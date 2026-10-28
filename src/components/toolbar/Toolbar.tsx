@@ -37,6 +37,12 @@ import {
   Search,
   ChevronDown,
   ChevronUp,
+  RulerDimensionLine,
+  Triangle,
+  Radius,
+  Crosshair,
+  Waypoints,
+  Tag,
 } from "lucide-react";
 import type { ToolType } from "@/types";
 
@@ -56,6 +62,12 @@ const tools: { type: ToolType; icon: React.ReactNode; label: string }[] = [
   { type: "crop", icon: <Crop size={18} />, label: "裁剪 (C)" },
   { type: "image", icon: <ImagePlus size={18} />, label: "插入图片 (I)" },
   { type: "magnifier", icon: <Search size={18} />, label: "放大镜 (Z)" },
+  { type: "dim_linear", icon: <RulerDimensionLine size={18} />, label: "线性尺寸 (D)" },
+  { type: "dim_angular", icon: <Triangle size={18} />, label: "角度标注 (G)" },
+  { type: "dim_radial", icon: <Radius size={18} />, label: "半径/直径 (Y)" },
+  { type: "center_mark", icon: <Crosshair size={18} />, label: "中心线标记 (K)" },
+  { type: "leader", icon: <Waypoints size={18} />, label: "引线标注 (F)" },
+  { type: "balloon", icon: <Tag size={18} />, label: "件号气泡 (J)" },
 ];
 
 interface ToolbarProps {
@@ -296,6 +308,12 @@ export function FloatingToolConfig() {
     "marker",
     "callout",
     "blur",
+    "dim_linear",
+    "dim_angular",
+    "dim_radial",
+    "center_mark",
+    "leader",
+    "balloon",
   ].includes(currentTool);
 
   // 选中标注时显示标注属性面板

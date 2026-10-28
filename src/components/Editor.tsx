@@ -1245,6 +1245,12 @@ export function Editor() {
         u: "blur",
         c: "crop",
         z: "magnifier",
+        d: "dim_linear",
+        g: "dim_angular",
+        y: "dim_radial",
+        k: "center_mark",
+        f: "leader",
+        j: "balloon",
       };
 
       if (!e.ctrlKey && !e.altKey && toolKeys[e.key.toLowerCase()]) {

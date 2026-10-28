@@ -8,6 +8,13 @@ import { Slider } from "@/components/ui/Slider";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { ChevronDown, RotateCcw } from "lucide-react";
+import type {
+  BalloonShape,
+  CadTermination,
+  DimMode,
+  DimTextPosition,
+  RadialKind,
+} from "@/types";
 
 interface ToolConfigPanelProps {
   orientation: "horizontal" | "vertical";
@@ -32,6 +39,53 @@ export function ToolConfigPanel({ orientation, compact = false }: ToolConfigPane
   const fontListId = useId();
   const fontInputRef = useRef<HTMLInputElement>(null);
   const fontInputClass = isCompact ? "min-w-[110px]" : "min-w-[140px]";
+
+  // CAD 标注共用配置项
+  const cadColorItem = (
+    <ConfigItem label="颜色" isHorizontal={isHorizontal} isCompact={isCompact}>
+      <ColorPicker
+        value={toolConfig.strokeColor}
+        onChange={(color) => setToolConfig({ strokeColor: color })}
+      />
+    </ConfigItem>
+  );
+  const cadWidthItem = (
+    <ConfigItem label="线宽" isHorizontal={isHorizontal} isCompact={isCompact}>
+      <Slider
+        value={toolConfig.cadStrokeWidth}
+        onChange={(v) => setToolConfig({ cadStrokeWidth: v })}
+        min={0.6}
+        max={6}
+        step={0.2}
+        className={sliderClass}
+        previewColor={toolConfig.strokeColor}
+      />
+    </ConfigItem>
+  );
+  const cadFontSizeItem = (
+    <ConfigItem label="字号" isHorizontal={isHorizontal} isCompact={isCompact}>
+      <Slider
+        value={toolConfig.fontSize}
+        onChange={(v) => setToolConfig({ fontSize: v })}
+        min={10}
+        max={48}
+        className={sliderClass}
+      />
+    </ConfigItem>
+  );
+  const cadTerminationItem = (
+    <ConfigItem label="端点符号" isHorizontal={isHorizontal} isCompact={isCompact}>
+      <Select
+        value={toolConfig.dimTermination}
+        onChange={(v) => setToolConfig({ dimTermination: v as CadTermination })}
+        options={[
+          { value: "arrow", label: "实心箭头 (ASME)" },
+          { value: "slash", label: "45°斜线 (ISO)" },
+          { value: "dot", label: "圆点" },
+        ]}
+      />
+    </ConfigItem>
+  );
 
   // 根据当前工具显示不同配置
   const renderConfig = () => {
@@ -535,6 +589,171 @@ export function ToolConfigPanel({ orientation, compact = false }: ToolConfigPane
             </ConfigItem>
             <ConfigItem label={`${toolConfig.magnifierScale.toFixed(1)}x`} isHorizontal={isHorizontal} isCompact={isCompact}>
               <span className="text-xs text-gray-400">滚轮调节</span>
+            </ConfigItem>
+          </>
+        );
+
+      case "dim_linear":
+        return (
+          <>
+            {cadColorItem}
+            {cadWidthItem}
+            {cadFontSizeItem}
+            <ConfigItem label="测量方式" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Select
+                value={toolConfig.dimMode}
+                onChange={(v) => setToolConfig({ dimMode: v as DimMode })}
+                options={[
+                  { value: "aligned", label: "对齐" },
+                  { value: "horizontal", label: "水平" },
+                  { value: "vertical", label: "垂直" },
+                ]}
+              />
+            </ConfigItem>
+            {cadTerminationItem}
+            <ConfigItem label="文字位置" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Select
+                value={toolConfig.dimTextPosition}
+                onChange={(v) =>
+                  setToolConfig({ dimTextPosition: v as DimTextPosition })
+                }
+                options={[
+                  { value: "above", label: "线上方 (ASME)" },
+                  { value: "inline", label: "居中打断 (ISO)" },
+                ]}
+              />
+            </ConfigItem>
+            <ConfigItem label="尺寸界线" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Select
+                value={toolConfig.showExtensionLines ? "on" : "off"}
+                onChange={(v) => setToolConfig({ showExtensionLines: v === "on" })}
+                options={[
+                  { value: "on", label: "显示" },
+                  { value: "off", label: "隐藏" },
+                ]}
+              />
+            </ConfigItem>
+          </>
+        );
+
+      case "dim_angular":
+        return (
+          <>
+            {cadColorItem}
+            {cadWidthItem}
+            {cadFontSizeItem}
+          </>
+        );
+
+      case "dim_radial":
+        return (
+          <>
+            {cadColorItem}
+            {cadWidthItem}
+            {cadFontSizeItem}
+            {cadTerminationItem}
+            <ConfigItem label="类型" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Select
+                value={toolConfig.radialKind}
+                onChange={(v) => setToolConfig({ radialKind: v as RadialKind })}
+                options={[
+                  { value: "radius", label: "半径 R" },
+                  { value: "diameter", label: "直径 ⌀" },
+                ]}
+              />
+            </ConfigItem>
+          </>
+        );
+
+      case "center_mark":
+        return (
+          <>
+            {cadColorItem}
+            {cadWidthItem}
+            <ConfigItem label="大小" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Slider
+                value={toolConfig.markerSize}
+                onChange={(v) => setToolConfig({ markerSize: v })}
+                min={12}
+                max={80}
+                className={sliderClass}
+              />
+            </ConfigItem>
+          </>
+        );
+
+      case "leader":
+        return (
+          <>
+            {cadColorItem}
+            {cadWidthItem}
+            {cadFontSizeItem}
+            {cadTerminationItem}
+          </>
+        );
+
+      case "balloon":
+        return (
+          <>
+            {cadColorItem}
+            {cadWidthItem}
+            <ConfigItem label="大小" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Slider
+                value={toolConfig.markerSize}
+                onChange={(v) => setToolConfig({ markerSize: v })}
+                min={16}
+                max={60}
+                className={sliderClass}
+              />
+            </ConfigItem>
+            <ConfigItem label="外形" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Select
+                value={toolConfig.balloonShape}
+                onChange={(v) =>
+                  setToolConfig({ balloonShape: v as BalloonShape })
+                }
+                options={[
+                  { value: "circle", label: "圆形气泡" },
+                  { value: "rect", label: "方框" },
+                  { value: "none", label: "无框" },
+                ]}
+              />
+            </ConfigItem>
+            <ConfigItem label="类型" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Select
+                value={toolConfig.markerType}
+                onChange={(v) =>
+                  setToolConfig({ markerType: v as "number" | "letter" })
+                }
+                options={[
+                  { value: "number", label: "数字 (1,2,3)" },
+                  { value: "letter", label: "字母 (A,B,C)" },
+                ]}
+              />
+            </ConfigItem>
+            {cadTerminationItem}
+            <ConfigItem label="起始序号" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={1}
+                  value={markerCounter}
+                  onChange={(e) => setMarkerCounter(Number(e.target.value) || 1)}
+                  className={cn(
+                    "rounded-md border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring",
+                    isCompact ? "w-14 px-1.5 py-0.5 text-xs" : "w-16 px-2 py-1 text-sm"
+                  )}
+                  title="设置下一个插入的件号"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={resetMarkerCounter}
+                  title="重置序号为 1"
+                >
+                  <RotateCcw size={14} />
+                </Button>
+              </div>
             </ConfigItem>
           </>
         );

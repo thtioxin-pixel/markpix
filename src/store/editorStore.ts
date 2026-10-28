@@ -44,6 +44,15 @@ const defaultToolConfig: ToolConfig = {
   cornerRadius: 0, // 矩形圆角，默认为0
   arrowStyle: "filled", // 默认实心箭头
   magnifierScale: 2, // 放大镜倍率，默认2倍
+
+  // CAD 尺寸标注（图纸线宽较细，独立于其他标注）
+  cadStrokeWidth: 1.6,
+  dimMode: "aligned",
+  dimTermination: "arrow",
+  dimTextPosition: "above",
+  showExtensionLines: true,
+  radialKind: "radius",
+  balloonShape: "circle",
 };
 
 const defaultWhiteboardConfig: WhiteboardConfig = {
@@ -179,6 +188,10 @@ interface EditorState {
   // 正在编辑文字
   editingTextId: string | null;
   setEditingTextId: (id: string | null) => void;
+
+  // 正在编辑 CAD 标注文字
+  editingCadTextId: string | null;
+  setEditingCadTextId: (id: string | null) => void;
 
   // 配置
   outputPattern: string;
@@ -428,6 +441,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   editingTextId: null,
   setEditingTextId: (id) => set({ editingTextId: id }),
 
+  // 正在编辑 CAD 标注文字
+  editingCadTextId: null,
+  setEditingCadTextId: (id) => set({ editingCadTextId: id }),
+
   // 配置
   outputPattern: "{input_file_base}_{YYYY_MM_DD-hh-mm-ss}_markpix.png",
   setOutputPattern: (pattern) => {
@@ -674,6 +691,107 @@ export function createAnnotation(
         scale: config.magnifierScale,
       };
       return extra ? { ...magnifier, ...extra } as Annotation : magnifier;
+    }
+    case "dim_linear": {
+      const dim: Annotation = {
+        ...baseProps,
+        type: "dim_linear" as const,
+        p2x: 0,
+        p2y: 0,
+        placeX: 0,
+        placeY: 0,
+        mode: config.dimMode,
+        termination: config.dimTermination,
+        textPosition: config.dimTextPosition,
+        showExtension: config.showExtensionLines,
+        text: "",
+        stroke: config.strokeColor,
+        strokeWidth: config.cadStrokeWidth,
+        fontSize: config.fontSize,
+        fontFamily: config.fontFamily,
+      };
+      return extra ? { ...dim, ...extra } as Annotation : dim;
+    }
+    case "dim_angular": {
+      const dim: Annotation = {
+        ...baseProps,
+        type: "dim_angular" as const,
+        ax: 0,
+        ay: 0,
+        bx: 0,
+        by: 0,
+        arcRadius: 40,
+        text: "",
+        stroke: config.strokeColor,
+        strokeWidth: config.cadStrokeWidth,
+        fontSize: config.fontSize,
+        fontFamily: config.fontFamily,
+      };
+      return extra ? { ...dim, ...extra } as Annotation : dim;
+    }
+    case "dim_radial": {
+      const dim: Annotation = {
+        ...baseProps,
+        type: "dim_radial" as const,
+        ex: 0,
+        ey: 0,
+        kind: config.radialKind,
+        text: "",
+        termination: config.dimTermination,
+        stroke: config.strokeColor,
+        strokeWidth: config.cadStrokeWidth,
+        fontSize: config.fontSize,
+        fontFamily: config.fontFamily,
+      };
+      return extra ? { ...dim, ...extra } as Annotation : dim;
+    }
+    case "center_mark": {
+      const mark: Annotation = {
+        ...baseProps,
+        type: "center_mark" as const,
+        size: config.markerSize,
+        stroke: config.strokeColor,
+        strokeWidth: config.cadStrokeWidth,
+        fontSize: config.fontSize,
+        fontFamily: config.fontFamily,
+      };
+      return extra ? { ...mark, ...extra } as Annotation : mark;
+    }
+    case "leader": {
+      const leader: Annotation = {
+        ...baseProps,
+        type: "leader" as const,
+        elbowX: 0,
+        elbowY: 0,
+        shelfDir: 1 as const,
+        shelfLength: 60,
+        text: "",
+        termination: config.dimTermination,
+        stroke: config.strokeColor,
+        strokeWidth: config.cadStrokeWidth,
+        fontSize: config.fontSize,
+        fontFamily: config.fontFamily,
+      };
+      return extra ? { ...leader, ...extra } as Annotation : leader;
+    }
+    case "balloon": {
+      const balloon: Annotation = {
+        ...baseProps,
+        type: "balloon" as const,
+        value: 1,
+        shape: config.balloonShape,
+        targetX: 0,
+        targetY: 0,
+        termination: config.dimTermination,
+        size: config.markerSize,
+        background: "#ffffff",
+        textColor: config.strokeColor,
+        stroke: config.strokeColor,
+        strokeWidth: config.cadStrokeWidth,
+        fontSize: config.fontSize,
+        fontFamily: config.fontFamily,
+      };
+      return extra ? { ...balloon, ...extra } as Annotation : balloon;
     }
     default:
       throw new Error(`未知的标注类型: ${type}`);

@@ -5,12 +5,143 @@ import Konva from "konva";
 import useImage from "use-image";
 import { useEditorStore, createAnnotation } from "@/store/editorStore";
 import { clamp, isNearWhiteColor } from "@/lib/utils";
+import { cadLocalBounds, isCadAnnotation } from "@/lib/cad";
 import { RenderAnnotation } from "./RenderAnnotation";
-import type { Annotation, RectAnnotation } from "@/types";
+import type {
+  Annotation,
+  RectAnnotation,
+  ToolConfig,
+  ToolType,
+} from "@/types";
 
 interface AnnotationCanvasProps {
   containerWidth: number;
   containerHeight: number;
+}
+
+/** CAD 类标注工具：采用分步打点，首段可按住拖出两个点 */
+const CAD_TOOLS: ToolType[] = [
+  "dim_linear",
+  "dim_angular",
+  "dim_radial",
+  "center_mark",
+  "leader",
+  "balloon",
+];
+
+/** 创建后需要立即手工输入文字的 CAD 工具 */
+const CAD_TEXT_TOOLS: ToolType[] = [
+  "dim_linear",
+  "dim_angular",
+  "dim_radial",
+  "leader",
+];
+
+/** 各 CAD 工具完成所需的取点数量 */
+function cadRequiredPoints(tool: ToolType): number {
+  if (tool === "center_mark") return 1;
+  if (tool === "dim_linear" || tool === "dim_angular") return 3;
+  return 2;
+}
+
+/**
+ * 由已确定的点（绝对图片坐标）与当前鼠标位置构建预览/最终标注。
+ * points[0] 作为标注锚点，其余点位存为相对偏移。
+ */
+function buildCadDraft(
+  tool: ToolType,
+  config: ToolConfig,
+  points: { x: number; y: number }[],
+  live: { x: number; y: number },
+  value: number | string
+): Annotation | null {
+  if (points.length === 0) return null;
+  const anchor = points[0];
+  const at = (i: number) => points[i] ?? live;
+  const rel = (p: { x: number; y: number }) => ({
+    x: p.x - anchor.x,
+    y: p.y - anchor.y,
+  });
+  const extra: Record<string, unknown> = {};
+
+  switch (tool) {
+    case "dim_linear": {
+      const p2 = rel(at(1));
+      const pl = rel(points.length >= 2 ? at(2) : at(1));
+      extra.p2x = p2.x;
+      extra.p2y = p2.y;
+      extra.placeX = pl.x;
+      extra.placeY = pl.y;
+      break;
+    }
+    case "dim_angular": {
+      const a = rel(at(1));
+      const b = rel(points.length >= 2 ? at(2) : at(1));
+      extra.ax = a.x;
+      extra.ay = a.y;
+      extra.bx = b.x;
+      extra.by = b.y;
+      extra.arcRadius = Math.max(
+        config.fontSize,
+        Math.min(Math.hypot(a.x, a.y), Math.hypot(b.x, b.y)) * 0.62
+      );
+      break;
+    }
+    case "dim_radial": {
+      const e = rel(at(1));
+      extra.ex = e.x;
+      extra.ey = e.y;
+      break;
+    }
+    case "center_mark": {
+      const dist = Math.hypot(live.x - anchor.x, live.y - anchor.y);
+      extra.size = dist > 6 ? Math.max(12, dist * 2) : config.markerSize;
+      break;
+    }
+    case "leader": {
+      const el = rel(at(1));
+      extra.elbowX = el.x;
+      extra.elbowY = el.y;
+      extra.shelfDir = el.x < 0 ? -1 : 1;
+      break;
+    }
+    case "balloon": {
+      const t = rel(at(1));
+      extra.targetX = t.x;
+      extra.targetY = t.y;
+      extra.value = value;
+      break;
+    }
+    default:
+      return null;
+  }
+
+  return createAnnotation(tool, config, anchor, extra);
+}
+
+/** 几何有效性校验，退化标注直接丢弃 */
+function isCadDraftComplete(ann: Annotation): boolean {
+  switch (ann.type) {
+    case "dim_linear":
+      return Math.hypot(ann.p2x, ann.p2y) > 8;
+    case "dim_angular": {
+      const la = Math.hypot(ann.ax, ann.ay);
+      const lb = Math.hypot(ann.bx, ann.by);
+      if (la <= 8 || lb <= 8) return false;
+      const dot = clamp((ann.ax * ann.bx + ann.ay * ann.by) / (la * lb), -1, 1);
+      return Math.abs(Math.acos(dot)) > 0.06;
+    }
+    case "dim_radial":
+      return Math.hypot(ann.ex, ann.ey) > 8;
+    case "leader":
+      return Math.hypot(ann.elbowX, ann.elbowY) > 8;
+    case "balloon":
+      return Math.hypot(ann.targetX, ann.targetY) > ann.size / 2 + 4;
+    case "center_mark":
+      return true;
+    default:
+      return false;
+  }
 }
 
 export function AnnotationCanvas({
@@ -49,6 +180,8 @@ export function AnnotationCanvas({
     cropMask,
     editingTextId,
     setEditingTextId,
+    editingCadTextId,
+    setEditingCadTextId,
   } = useEditorStore();
 
   // 加载图片
@@ -70,6 +203,37 @@ export function AnnotationCanvas({
   
   // 用于 requestAnimationFrame 节流
   const rafRef = useRef<number | null>(null);
+
+  // CAD 标注打点状态
+  const cadToolRef = useRef<ToolType | null>(null);
+  const cadPointsRef = useRef<{ x: number; y: number }[]>([]);
+  const cadGestureRef = useRef<{
+    start: { x: number; y: number };
+    multi: boolean;
+  } | null>(null);
+  const cadValueRef = useRef<number | string>(1);
+
+  const resetCadDraft = useCallback(() => {
+    cadToolRef.current = null;
+    cadPointsRef.current = [];
+    cadGestureRef.current = null;
+    setDrawingAnnotation(null);
+    setIsDrawing(false);
+  }, [setIsDrawing]);
+
+  // 切换工具时丢弃未完成的 CAD 标注
+  useEffect(() => {
+    resetCadDraft();
+  }, [currentTool, resetCadDraft]);
+
+  // Esc 取消进行中的 CAD 标注
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") resetCadDraft();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [resetCadDraft]);
 
   // 删除按钮位置（基于选中标注的边界框）
   const [deleteButtonPos, setDeleteButtonPos] = useState<{ x: number; y: number } | null>(null);
@@ -288,6 +452,7 @@ export function AnnotationCanvas({
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       // 如果正在编辑文字，不处理（让 blur 事件先触发）
       if (editingTextId) return;
+      if (editingCadTextId) return;
       
       // 如果点击的是 Transformer 的锚点，不处理
       if (e.target.getParent()?.className === "Transformer") return;
@@ -335,6 +500,33 @@ export function AnnotationCanvas({
             clearSelection();
           }
         }
+        return;
+      }
+
+      // CAD 标注：分步打点，首段可按住拖出起止两点
+      if (CAD_TOOLS.includes(currentTool)) {
+        if (cadToolRef.current !== currentTool) {
+          cadToolRef.current = currentTool;
+          cadPointsRef.current = [];
+          cadValueRef.current =
+            toolConfig.markerType === "number"
+              ? markerCounter
+              : String.fromCharCode(64 + markerCounter);
+        }
+        cadGestureRef.current = {
+          start: pos,
+          multi: cadPointsRef.current.length === 0,
+        };
+        setIsDrawing(true);
+        setDrawingAnnotation(
+          buildCadDraft(
+            currentTool,
+            toolConfig,
+            [pos],
+            pos,
+            cadValueRef.current
+          )
+        );
         return;
       }
 
@@ -479,6 +671,7 @@ export function AnnotationCanvas({
       cropArea,
       isCropping,
       editingTextId,
+      editingCadTextId,
     ]
   );
 
@@ -550,6 +743,26 @@ export function AnnotationCanvas({
       setMagnifierPos(null);
     }
 
+    // CAD 标注预览：待定点跟随鼠标
+    if (cadToolRef.current && (cadGestureRef.current || cadPointsRef.current.length > 0)) {
+      const pos = getPointerPosition();
+      if (!pos) return;
+      const gesture = cadGestureRef.current;
+      const points = gesture?.multi
+        ? [gesture.start]
+        : cadPointsRef.current;
+      setDrawingAnnotation(
+        buildCadDraft(
+          cadToolRef.current,
+          toolConfig,
+          points,
+          pos,
+          cadValueRef.current
+        )
+      );
+      return;
+    }
+
     if (!isDrawing || !drawingAnnotation || !startPointRef.current) return;
 
     const pos = getPointerPosition();
@@ -607,7 +820,7 @@ export function AnnotationCanvas({
         });
         break;
     }
-  }, [isDrawing, drawingAnnotation, getPointerPosition, currentTool, setViewState, setCropArea, magnifierPos]);
+  }, [isDrawing, drawingAnnotation, getPointerPosition, currentTool, setViewState, setCropArea, magnifierPos, toolConfig]);
 
   // 使用 requestAnimationFrame 节流的鼠标移动处理
   const handleMouseMove = useCallback(() => {
@@ -707,6 +920,18 @@ export function AnnotationCanvas({
                 ah = maxY - minY;
               }
               break;
+            default:
+              // CAD 标注：由几何布局计算局部包围盒
+              if (isCadAnnotation(annotation)) {
+                const box = cadLocalBounds(annotation);
+                if (box) {
+                  ax = annotation.x + box.x;
+                  ay = annotation.y + box.y;
+                  aw = box.w;
+                  ah = box.h;
+                }
+              }
+              break;
           }
           
           // 检查是否与选择框相交
@@ -741,6 +966,51 @@ export function AnnotationCanvas({
       else {
         cropWaitingSecondClickRef.current = true;
         // 不清除 startPointRef，等待第二次点击
+      }
+      return;
+    }
+
+    // CAD 标注：抬起即确定当前点，取点足够后写入标注
+    if (cadToolRef.current && isDrawing) {
+      const tool = cadToolRef.current;
+      const gesture = cadGestureRef.current;
+      cadGestureRef.current = null;
+      const pos = getPointerPosition();
+      if (!pos) {
+        resetCadDraft();
+        return;
+      }
+      const dragged = gesture
+        ? Math.hypot(pos.x - gesture.start.x, pos.y - gesture.start.y) > 6
+        : false;
+      const committed =
+        gesture?.multi && dragged
+          ? [gesture.start, pos]
+          : [...cadPointsRef.current, pos];
+      cadPointsRef.current = committed;
+
+      const need = cadRequiredPoints(tool);
+      const draft = buildCadDraft(
+        tool,
+        toolConfig,
+        committed.slice(0, need),
+        pos,
+        cadValueRef.current
+      );
+
+      if (committed.length >= need) {
+        if (draft && isCadDraftComplete(draft)) {
+          addAnnotation(draft);
+          if (tool === "balloon") incrementMarkerCounter();
+          if (CAD_TEXT_TOOLS.includes(tool)) {
+            setEditingCadTextId(draft.id);
+            pushHistory();
+          }
+        }
+        resetCadDraft();
+      } else {
+        setIsDrawing(false);
+        setDrawingAnnotation(draft);
       }
       return;
     }
@@ -798,7 +1068,7 @@ export function AnnotationCanvas({
 
     setDrawingAnnotation(null);
     startPointRef.current = null;
-  }, [isDrawing, drawingAnnotation, addAnnotation, setIsDrawing, isCropping, currentTool, cropArea, setIsCropping, setCropArea, selectionRect, annotations, selectedIds, setSelectedIds, incrementMarkerCounter]);
+  }, [isDrawing, drawingAnnotation, addAnnotation, setIsDrawing, isCropping, currentTool, cropArea, setIsCropping, setCropArea, selectionRect, annotations, selectedIds, setSelectedIds, incrementMarkerCounter, toolConfig, getPointerPosition, pushHistory, setEditingCadTextId, resetCadDraft]);
 
   // 处理滚轮：根据选中标注类型调节属性，或缩放画布
   const handleCanvasWheel = useCallback(
@@ -855,6 +1125,24 @@ export function AnnotationCanvas({
             const currentWidth = (firstAnn as { strokeWidth: number }).strokeWidth;
             const newStrokeWidth = clamp(currentWidth + delta, 1, 50);
             setToolConfig({ strokeWidth: newStrokeWidth });
+            selectedAnnotations.forEach(ann => {
+              if ("strokeWidth" in ann) {
+                updateAnnotation(ann.id, { strokeWidth: newStrokeWidth });
+              }
+            });
+            adjusted = true;
+            break;
+          }
+          case "dim_linear":
+          case "dim_angular":
+          case "dim_radial":
+          case "center_mark":
+          case "leader":
+          case "balloon": {
+            // CAD 图纸线较细，用 0.2 的步长微调尺寸线线宽
+            const currentWidth = (firstAnn as { strokeWidth: number }).strokeWidth;
+            const newStrokeWidth = clamp(currentWidth + delta * 0.2, 0.6, 12);
+            setToolConfig({ cadStrokeWidth: newStrokeWidth });
             selectedAnnotations.forEach(ann => {
               if ("strokeWidth" in ann) {
                 updateAnnotation(ann.id, { strokeWidth: newStrokeWidth });
@@ -1066,6 +1354,84 @@ export function AnnotationCanvas({
           updates.size = callout.size * Math.max(scaleX, scaleY);
           updates.targetX = callout.targetX * scaleX;
           updates.targetY = callout.targetY * scaleY;
+          break;
+        }
+        case "dim_linear": {
+          // 线性尺寸：缩放测量点、尺寸线定位与文字
+          const dim = annotation as Extract<
+            Annotation,
+            { type: "dim_linear" }
+          >;
+          const ratio = Math.max(scaleX, scaleY);
+          updates.p2x = dim.p2x * scaleX;
+          updates.p2y = dim.p2y * scaleY;
+          updates.placeX = dim.placeX * scaleX;
+          updates.placeY = dim.placeY * scaleY;
+          updates.fontSize = dim.fontSize * ratio;
+          updates.strokeWidth = dim.strokeWidth * ratio;
+          break;
+        }
+        case "dim_angular": {
+          const dim = annotation as Extract<
+            Annotation,
+            { type: "dim_angular" }
+          >;
+          const ratio = Math.max(scaleX, scaleY);
+          updates.ax = dim.ax * scaleX;
+          updates.ay = dim.ay * scaleY;
+          updates.bx = dim.bx * scaleX;
+          updates.by = dim.by * scaleY;
+          updates.arcRadius = dim.arcRadius * ratio;
+          updates.fontSize = dim.fontSize * ratio;
+          updates.strokeWidth = dim.strokeWidth * ratio;
+          break;
+        }
+        case "dim_radial": {
+          const dim = annotation as Extract<
+            Annotation,
+            { type: "dim_radial" }
+          >;
+          const ratio = Math.max(scaleX, scaleY);
+          updates.ex = dim.ex * scaleX;
+          updates.ey = dim.ey * scaleY;
+          updates.fontSize = dim.fontSize * ratio;
+          updates.strokeWidth = dim.strokeWidth * ratio;
+          break;
+        }
+        case "center_mark": {
+          const mark = annotation as Extract<
+            Annotation,
+            { type: "center_mark" }
+          >;
+          const ratio = Math.max(scaleX, scaleY);
+          updates.size = mark.size * ratio;
+          updates.strokeWidth = mark.strokeWidth * ratio;
+          break;
+        }
+        case "leader": {
+          const leader = annotation as Extract<
+            Annotation,
+            { type: "leader" }
+          >;
+          const ratio = Math.max(scaleX, scaleY);
+          updates.elbowX = leader.elbowX * scaleX;
+          updates.elbowY = leader.elbowY * scaleY;
+          updates.shelfLength = leader.shelfLength * ratio;
+          updates.fontSize = leader.fontSize * ratio;
+          updates.strokeWidth = leader.strokeWidth * ratio;
+          break;
+        }
+        case "balloon": {
+          const balloon = annotation as Extract<
+            Annotation,
+            { type: "balloon" }
+          >;
+          const ratio = Math.max(scaleX, scaleY);
+          updates.targetX = balloon.targetX * scaleX;
+          updates.targetY = balloon.targetY * scaleY;
+          updates.size = balloon.size * ratio;
+          updates.fontSize = balloon.fontSize * ratio;
+          updates.strokeWidth = balloon.strokeWidth * ratio;
           break;
         }
       }
