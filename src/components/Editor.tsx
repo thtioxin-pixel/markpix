@@ -118,6 +118,19 @@ function getAnnotationBounds(annotation: Annotation): AnnotationBounds {
         maxY: annotation.y + r,
       };
     }
+    case "callout": {
+      const r = annotation.size / 2;
+      const minX = Math.min(-r, annotation.targetX);
+      const minY = Math.min(-r, annotation.targetY);
+      const maxX = Math.max(r, annotation.targetX);
+      const maxY = Math.max(r, annotation.targetY);
+      return {
+        minX: annotation.x + minX,
+        minY: annotation.y + minY,
+        maxX: annotation.x + maxX,
+        maxY: annotation.y + maxY,
+      };
+    }
     case "magnifier": {
       const targetBounds = {
         minX: annotation.x - annotation.targetRadius,
@@ -524,7 +537,10 @@ export function Editor() {
         const annotationGroup = stage.findOne(".annotations-group") as Konva.Group;
         if (annotationGroup) {
           annotationGroup.children?.forEach((child) => {
-            if (child.name() !== "background-image") {
+            if (
+              child.name() !== "background-image" &&
+              !child.name().startsWith("guide-")
+            ) {
               const clone = child.clone();
               // 重置缩放，应用裁剪偏移
               clone.scaleX(1);
@@ -554,8 +570,34 @@ export function Editor() {
     });
   }, [cropMask, image, annotations]);
 
-  // 保存文件
-  const handleSave = async () => {
+  // 当前保存路径：打开的文件用其原始路径；首次另存为后记住新路径，之后的"保存"直接覆盖
+  const lastSavePathRef = useRef<string | null>(null);
+
+  // 显示无侵入式提示
+  const showToast = useCallback((message: string, type: "success" | "error" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 2000);
+  }, []);
+
+  // 生成保存对话框默认文件名，根据配置的模式
+  const getSaveDefaultName = useCallback(() => {
+    if (!image) return "image.png";
+    const baseName = image.name?.replace(/\.[^.]+$/, "") || "image";
+    const now = new Date();
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    const timestamp = `${now.getFullYear()}_${pad(now.getMonth() + 1)}_${pad(now.getDate())}-${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+
+    // CLI 参数优先于配置
+    let defaultName = cliOutputPattern || outputPattern || "{input_file_base}_{YYYY_MM_DD-hh-mm-ss}_markpix.png";
+    defaultName = defaultName
+      .replace(/{input_file_base}/g, baseName)
+      .replace(/{input_file}/g, image.path || image.name || "")
+      .replace(/{YYYY_MM_DD-hh-mm-ss}/g, timestamp);
+    return defaultName;
+  }, [image, cliOutputPattern, outputPattern]);
+
+  // 另存为（总是弹出保存对话框）
+  const handleSaveAs = useCallback(async () => {
     if (!image) return;
 
     try {
@@ -565,21 +607,8 @@ export function Editor() {
         return;
       }
 
-      // 生成默认文件名，根据配置的模式
-      const baseName = image.name?.replace(/\.[^.]+$/, "") || "image";
-      const now = new Date();
-      const pad = (n: number) => n.toString().padStart(2, "0");
-      const timestamp = `${now.getFullYear()}_${pad(now.getMonth() + 1)}_${pad(now.getDate())}-${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-
-      // CLI 参数优先于配置
-      let defaultName = cliOutputPattern || outputPattern || "{input_file_base}_{YYYY_MM_DD-hh-mm-ss}_markpix.png";
-      defaultName = defaultName
-        .replace(/{input_file_base}/g, baseName)
-        .replace(/{input_file}/g, image.path || image.name || "")
-        .replace(/{YYYY_MM_DD-hh-mm-ss}/g, timestamp);
-
       const filePath = await save({
-        defaultPath: defaultName,
+        defaultPath: getSaveDefaultName(),
         filters: [
           { name: "PNG", extensions: ["png"] },
           { name: "JPEG", extensions: ["jpg", "jpeg"] },
@@ -588,20 +617,46 @@ export function Editor() {
 
       if (filePath) {
         await invoke("save_image_file", { path: filePath, data: dataUrl });
+        // 记住路径，之后的"保存"直接覆盖该文件
+        lastSavePathRef.current = filePath;
         showToast("保存成功");
       }
     } catch (error) {
       console.error("保存失败:", error);
       showToast(`保存失败: ${error}`, "error");
     }
-  };
+  }, [image, getCanvasDataUrl, getSaveDefaultName, showToast]);
+
+  // 保存（直接覆盖当前文件；无路径时回退到另存为）
+  const handleSave = useCallback(async () => {
+    if (!image) return;
+
+    try {
+      const dataUrl = await getCanvasDataUrl();
+      if (!dataUrl) {
+        showToast("无法获取画布数据", "error");
+        return;
+      }
+
+      const targetPath = lastSavePathRef.current || image.path;
+      if (targetPath) {
+        await invoke("save_image_file", { path: targetPath, data: dataUrl });
+        showToast("保存成功");
+      } else {
+        await handleSaveAs();
+      }
+    } catch (error) {
+      console.error("保存失败:", error);
+      showToast(`保存失败: ${error}`, "error");
+    }
+  }, [image, getCanvasDataUrl, handleSaveAs, showToast]);
 
   // 保存当前并打开新文件
   const handleSaveAndOpen = useCallback(async () => {
     setShowOpenConfirm(false);
     await handleSave();
     await doOpenFile();
-  }, []);
+  }, [handleSave]);
 
   // 插入图片（作为贴图）
   const handleInsertImage = async () => {
@@ -648,12 +703,6 @@ export function Editor() {
       console.error("插入图片失败:", error);
     }
   };
-
-  // 显示无侵入式提示
-  const showToast = useCallback((message: string, type: "success" | "error" = "success") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 2000);
-  }, []);
 
   const handleOpenWhiteboardDialog = useCallback(() => {
     if (image) return;
@@ -1192,6 +1241,7 @@ export function Editor() {
         t: "text",
         b: "brush",
         m: "marker",
+        n: "callout",
         u: "blur",
         c: "crop",
         z: "magnifier",
@@ -1231,6 +1281,7 @@ export function Editor() {
         onOpenFile={handleOpenFile}
         onCreateBlank={handleOpenWhiteboardDialog}
         onSave={handleSave}
+        onSaveAs={handleSaveAs}
         onCopy={handleCopy}
         onOpenSettings={() => setShowSettings(true)}
         onClose={handleClose}

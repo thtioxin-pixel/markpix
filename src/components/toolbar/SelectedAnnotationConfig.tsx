@@ -391,6 +391,59 @@ export function SelectedAnnotationConfig({ orientation, compact = false }: Selec
         );
       }
 
+      case "callout": {
+        const callout = firstAnnotation as Extract<Annotation, { type: "callout" }>;
+        return (
+          <>
+            <ConfigItem label="颜色" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <ColorPicker
+                value={callout.fill}
+                onChange={(color) => updateSelectedAnnotations({ fill: color, textColor: "#fff" })}
+              />
+            </ConfigItem>
+            <ConfigItem label="序号大小" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Slider
+                value={callout.size}
+                onChange={(v) => updateSelectedAnnotations({ size: v })}
+                min={20}
+                max={60}
+                className={sliderClass}
+              />
+            </ConfigItem>
+            <ConfigItem label="线条粗细" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Slider
+                value={callout.strokeWidth}
+                onChange={(v) => updateSelectedAnnotations({ strokeWidth: v })}
+                min={1}
+                max={20}
+                className={sliderClass}
+                previewColor={callout.fill}
+              />
+            </ConfigItem>
+            <ConfigItem label="样式" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Select
+                value={callout.markerStyle}
+                onChange={(v) => updateSelectedAnnotations({ markerStyle: v as "filled" | "outlined" })}
+                options={[
+                  { value: "filled", label: "实心" },
+                  { value: "outlined", label: "空心" },
+                ]}
+              />
+            </ConfigItem>
+            <ConfigItem label="箭头样式" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Select
+                value={callout.arrowStyle}
+                onChange={(v) => updateSelectedAnnotations({ arrowStyle: v as "normal" | "filled" })}
+                options={[
+                  { value: "filled", label: "QQ风格" },
+                  { value: "normal", label: "普通" },
+                ]}
+              />
+            </ConfigItem>
+          </>
+        );
+      }
+
       case "blur": {
         const blur = firstAnnotation as Extract<Annotation, { type: "blur" }>;
         return (

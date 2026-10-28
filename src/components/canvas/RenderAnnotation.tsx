@@ -300,6 +300,16 @@ export function RenderAnnotation({
         />
       );
 
+    case "callout":
+      return (
+        <CalloutAnnotationRenderer
+          annotation={annotation}
+          commonProps={commonProps}
+          nodeRef={nodeRef}
+          scale={scale}
+        />
+      );
+
     case "blur":
       return (
         <BlurAnnotationRenderer
@@ -748,6 +758,135 @@ function MarkerAnnotationRenderer({
       />
       <Text
         text={textValue}
+        fontSize={fontSize}
+        fontFamily="Arial, sans-serif"
+        fontStyle="bold"
+        fill={isFilled ? annotation.textColor : annotation.fill}
+        width={compensatedSize}
+        height={compensatedSize}
+        align="center"
+        verticalAlign="middle"
+        offsetX={compensatedSize / 2}
+        offsetY={compensatedSize / 2}
+      />
+    </Group>
+  );
+}
+
+// 序号引导箭头渲染器（序号圆 + 指向目标的箭头）
+interface CalloutAnnotationRendererProps {
+  annotation: Extract<Annotation, { type: "callout" }>;
+  commonProps: Record<string, unknown>;
+  nodeRef: React.RefObject<Konva.Node | null>;
+  scale?: number;
+}
+
+function CalloutAnnotationRenderer({
+  annotation,
+  commonProps,
+  nodeRef,
+  scale = 1,
+}: CalloutAnnotationRendererProps) {
+  const isFilled = annotation.markerStyle === "filled";
+  // 补偿后的尺寸，保证缩放时标记视觉大小一致
+  const compensatedSize = annotation.size / scale;
+  const radius = compensatedSize / 2;
+  const fontSize = compensatedSize * 0.5;
+
+  const { targetX, targetY } = annotation;
+  const len = Math.sqrt(targetX * targetX + targetY * targetY);
+  const hasArrow = len > radius + 2;
+  const ux = len > 0 ? targetX / len : 0;
+  const uy = len > 0 ? targetY / len : 0;
+  // 箭头从圆的边缘开始，避免压住序号
+  const startX = ux * radius;
+  const startY = uy * radius;
+
+  const strokeWidth = annotation.strokeWidth / scale;
+  const dash =
+    annotation.lineStyle === "dashed" ? [10 / scale, 5 / scale] : undefined;
+
+  // 透明点击区域，覆盖整个标记与箭头
+  const padding = Math.max(10 / scale, strokeWidth * 2);
+  const hitMinX = Math.min(-radius, targetX) - padding;
+  const hitMinY = Math.min(-radius, targetY) - padding;
+  const hitMaxX = Math.max(radius, targetX) + padding;
+  const hitMaxY = Math.max(radius, targetY) + padding;
+
+  let arrowNode: React.ReactNode = null;
+  if (hasArrow) {
+    if (annotation.arrowStyle === "filled") {
+      // QQ 风格：尾部细、头部粗的锥形
+      const headLength = Math.min(
+        len * 0.4,
+        Math.max(12 / scale, strokeWidth * 4)
+      );
+      const headWidth = Math.max(headLength * 0.5, strokeWidth * 1.2);
+      const bodyWidth = Math.max(headWidth * 0.35, strokeWidth * 0.4);
+      const baseX = targetX - ux * headLength;
+      const baseY = targetY - uy * headLength;
+      const px = -uy;
+      const py = ux;
+      arrowNode = (
+        <Line
+          points={[
+            startX,
+            startY,
+            baseX + px * bodyWidth,
+            baseY + py * bodyWidth,
+            baseX + px * headWidth,
+            baseY + py * headWidth,
+            targetX,
+            targetY,
+            baseX - px * headWidth,
+            baseY - py * headWidth,
+            baseX - px * bodyWidth,
+            baseY - py * bodyWidth,
+          ]}
+          fill={annotation.fill}
+          closed={true}
+          listening={false}
+        />
+      );
+    } else {
+      arrowNode = (
+        <Arrow
+          points={[startX, startY, targetX, targetY]}
+          stroke={annotation.fill}
+          fill={annotation.fill}
+          strokeWidth={strokeWidth}
+          pointerLength={Math.max(10 / scale, strokeWidth * 2.5)}
+          pointerWidth={Math.max(8 / scale, strokeWidth * 2)}
+          dash={dash}
+          lineCap="round"
+          lineJoin="round"
+          listening={false}
+        />
+      );
+    }
+  }
+
+  return (
+    <Group
+      ref={nodeRef as React.RefObject<Konva.Group>}
+      {...commonProps}
+    >
+      <Rect
+        x={hitMinX}
+        y={hitMinY}
+        width={hitMaxX - hitMinX}
+        height={hitMaxY - hitMinY}
+        fill="transparent"
+      />
+      {arrowNode}
+      <Circle
+        radius={radius}
+        fill={isFilled ? annotation.fill : "transparent"}
+        stroke={annotation.fill}
+        strokeWidth={2 / scale}
+      />
+      <Text
+        text={String(annotation.value)}
         fontSize={fontSize}
         fontFamily="Arial, sans-serif"
         fontStyle="bold"

@@ -78,6 +78,8 @@ pub struct AppConfig {
     pub custom_actions: Vec<CustomAction>,
     /// 文本工具配置
     pub text_tool_config: TextToolConfig,
+    /// 各工具的样式配置（自动保存）
+    pub tool_config: toml::Value,
 }
 
 impl Default for AppConfig {
@@ -87,6 +89,7 @@ impl Default for AppConfig {
             output_pattern: "{input_file_base}_{YYYY_MM_DD-hh-mm-ss}_markpix.png".to_string(),
             custom_actions: vec![],
             text_tool_config: TextToolConfig::default(),
+            tool_config: toml::Value::Table(toml::map::Map::new()),
         }
     }
 }

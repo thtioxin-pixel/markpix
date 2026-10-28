@@ -53,23 +53,6 @@ const defaultWhiteboardConfig: WhiteboardConfig = {
   texture: "none",
 };
 
-const TEXT_TOOL_CONFIG_KEYS: Array<keyof ToolConfig> = [
-  "strokeColor",
-  "fontSize",
-  "fontFamily",
-  "textBackgroundColor",
-  "textStyle",
-  "bubbleStroke",
-  "bubbleFill",
-  "bubbleTailPosition",
-];
-
-function hasTextToolConfigPatch(config: Partial<ToolConfig>): boolean {
-  return Object.keys(config).some((key) =>
-    TEXT_TOOL_CONFIG_KEYS.includes(key as keyof ToolConfig)
-  );
-}
-
 function serializeTextToolConfig(toolConfig: ToolConfig) {
   return {
     stroke_color: toolConfig.strokeColor,
@@ -81,6 +64,20 @@ function serializeTextToolConfig(toolConfig: ToolConfig) {
     bubble_fill: toolConfig.bubbleFill,
     bubble_tail_position: toolConfig.bubbleTailPosition,
   };
+}
+
+/**
+ * 工具样式自动保存的防抖定时器
+ */
+let toolConfigSaveTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleToolConfigSave(save: () => void) {
+  if (toolConfigSaveTimer !== null) {
+    clearTimeout(toolConfigSaveTimer);
+  }
+  toolConfigSaveTimer = setTimeout(() => {
+    toolConfigSaveTimer = null;
+    save();
+  }, 300);
 }
 
 /**
@@ -152,6 +149,7 @@ interface EditorState {
 
   // 序号标记计数器
   markerCounter: number;
+  setMarkerCounter: (value: number) => void;
   incrementMarkerCounter: () => void;
   resetMarkerCounter: () => void;
 
@@ -213,18 +211,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // 工具配置
   toolConfig: defaultToolConfig,
   setToolConfig: (config) => {
-    const hasTextPatch = hasTextToolConfigPatch(config);
-    const patchKeys = Object.keys(config) as Array<keyof ToolConfig>;
-    const isOnlyStrokeColorPatch = patchKeys.length === 1 && patchKeys[0] === "strokeColor";
     set((state) => ({
       toolConfig: { ...state.toolConfig, ...config },
     }));
-    const shouldPersistTextConfig =
-      hasTextPatch && (!isOnlyStrokeColorPatch || get().currentTool === "text");
-    // Don't persist when fontFamily is cleared (dropdown open action)
-    if (shouldPersistTextConfig && config.fontFamily !== "") {
-      get().saveConfig();
-    }
+    // 字体下拉展开时会清空 fontFamily，此时不写入配置
+    if (config.fontFamily === "") return;
+    // 修改任意工具样式后自动保存到配置文件
+    scheduleToolConfigSave(() => get().saveConfig());
   },
 
   // 标注对象
@@ -371,6 +364,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   // 序号标记计数器
   markerCounter: 1,
+  setMarkerCounter: (value) =>
+    set({ markerCounter: Math.max(1, Math.floor(value)) }),
   incrementMarkerCounter: () =>
     set((state) => ({ markerCounter: state.markerCounter + 1 })),
   resetMarkerCounter: () => set({ markerCounter: 1 }),
@@ -444,6 +439,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     try {
       const config = await invoke<AppConfig>("get_config");
       const currentToolConfig = get().toolConfig;
+      const persistedToolConfig = config.tool_config ?? {};
       const persistedTextToolConfig = config.text_tool_config;
       set({ 
         theme: config.theme, 
@@ -451,6 +447,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         customActions: config.custom_actions,
         toolConfig: {
           ...currentToolConfig,
+          ...persistedToolConfig,
           ...(persistedTextToolConfig?.stroke_color !== undefined
             ? { strokeColor: persistedTextToolConfig.stroke_color }
             : {}),
@@ -508,6 +505,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           output_pattern: outputPattern,
           custom_actions: customActions,
           text_tool_config: serializeTextToolConfig(toolConfig),
+          tool_config: toolConfig,
         }
       });
     } catch (error) {
@@ -629,6 +627,24 @@ export function createAnnotation(
         textColor: "#ffffff",
       };
       return extra ? { ...marker, ...extra } as Annotation : marker;
+    }
+    case "callout": {
+      const callout: Annotation = {
+        ...baseProps,
+        type: "callout" as const,
+        value: 1,
+        targetX: 0,
+        targetY: 0,
+        markerStyle: config.markerStyle,
+        markerType: config.markerType,
+        size: config.markerSize,
+        fill: config.strokeColor,
+        textColor: "#ffffff",
+        strokeWidth: config.strokeWidth,
+        lineStyle: config.lineStyle,
+        arrowStyle: config.arrowStyle,
+      };
+      return extra ? { ...callout, ...extra } as Annotation : callout;
     }
     case "blur": {
       const blur: Annotation = {

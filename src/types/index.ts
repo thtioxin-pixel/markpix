@@ -13,6 +13,7 @@ export type ToolType =
   | "text" // 文字
   | "brush" // 画笔
   | "marker" // 序号标记
+  | "callout" // 序号引导箭头
   | "blur" // 马赛克/模糊
   | "crop" // 裁剪
   | "image" // 图片贴图
@@ -177,6 +178,24 @@ export interface MarkerAnnotation extends BaseAnnotation {
 }
 
 /**
+ * 序号引导箭头标注（序号圆标记 + 指向目标的箭头）
+ */
+export interface CalloutAnnotation extends BaseAnnotation {
+  type: "callout";
+  value: number | string;
+  targetX: number; // 箭头尖端相对标记中心的水平偏移
+  targetY: number; // 箭头尖端相对标记中心的垂直偏移
+  markerStyle: MarkerStyle;
+  markerType: MarkerType;
+  size: number;
+  fill: string;
+  textColor: string;
+  strokeWidth: number;
+  lineStyle: LineStyle;
+  arrowStyle: ArrowStyle;
+}
+
+/**
  * 模糊区域标注
  */
 export interface BlurAnnotation extends BaseAnnotation {
@@ -223,6 +242,7 @@ export type Annotation =
   | TextAnnotation
   | BrushAnnotation
   | MarkerAnnotation
+  | CalloutAnnotation
   | BlurAnnotation
   | ImageAnnotation
   | MagnifierAnnotation;
@@ -354,4 +374,5 @@ export interface AppConfig {
     bubble_fill?: string;
     bubble_tail_position?: BubbleTailPosition;
   };
+  tool_config?: Partial<ToolConfig>;
 }

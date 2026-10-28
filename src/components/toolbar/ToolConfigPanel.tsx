@@ -20,6 +20,7 @@ export function ToolConfigPanel({ orientation, compact = false }: ToolConfigPane
     toolConfig,
     setToolConfig,
     resetMarkerCounter,
+    setMarkerCounter,
     markerCounter,
     systemFonts,
   } = useEditorStore();
@@ -325,6 +326,108 @@ export function ToolConfigPanel({ orientation, compact = false }: ToolConfigPane
           </>
         );
 
+      case "callout":
+        return (
+          <>
+            <ConfigItem label="颜色" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <ColorPicker
+                value={toolConfig.strokeColor}
+                onChange={(color) => setToolConfig({ strokeColor: color })}
+              />
+            </ConfigItem>
+            <ConfigItem label="序号大小" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Slider
+                value={toolConfig.markerSize}
+                onChange={(v) => setToolConfig({ markerSize: v })}
+                min={20}
+                max={60}
+                className={sliderClass}
+              />
+            </ConfigItem>
+            <ConfigItem label="线条粗细" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Slider
+                value={toolConfig.strokeWidth}
+                onChange={(v) => setToolConfig({ strokeWidth: v })}
+                min={1}
+                max={20}
+                className={sliderClass}
+                previewColor={toolConfig.strokeColor}
+              />
+            </ConfigItem>
+            <ConfigItem label="类型" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Select
+                value={toolConfig.markerType}
+                onChange={(v) =>
+                  setToolConfig({ markerType: v as "number" | "letter" })
+                }
+                options={[
+                  { value: "number", label: "数字 (1,2,3)" },
+                  { value: "letter", label: "字母 (A,B,C)" },
+                ]}
+              />
+            </ConfigItem>
+            <ConfigItem label="样式" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Select
+                value={toolConfig.markerStyle}
+                onChange={(v) =>
+                  setToolConfig({ markerStyle: v as "filled" | "outlined" })
+                }
+                options={[
+                  { value: "filled", label: "实心" },
+                  { value: "outlined", label: "空心" },
+                ]}
+              />
+            </ConfigItem>
+            <ConfigItem label="箭头样式" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Select
+                value={toolConfig.arrowStyle}
+                onChange={(v) =>
+                  setToolConfig({ arrowStyle: v as "normal" | "filled" })
+                }
+                options={[
+                  { value: "filled", label: "QQ风格" },
+                  { value: "normal", label: "普通" },
+                ]}
+              />
+            </ConfigItem>
+            <ConfigItem label="线条样式" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <Select
+                value={toolConfig.lineStyle}
+                onChange={(v) =>
+                  setToolConfig({ lineStyle: v as "solid" | "dashed" })
+                }
+                options={[
+                  { value: "solid", label: "实线" },
+                  { value: "dashed", label: "虚线" },
+                ]}
+              />
+            </ConfigItem>
+            <ConfigItem label="起始序号" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={1}
+                  value={markerCounter}
+                  onChange={(e) => setMarkerCounter(Number(e.target.value) || 1)}
+                  className={cn(
+                    "rounded-md border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring",
+                    isCompact ? "w-14 px-1.5 py-0.5 text-xs" : "w-16 px-2 py-1 text-sm"
+                  )}
+                  title="设置下一个插入的序号"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={resetMarkerCounter}
+                  title="重置序号为 1"
+                >
+                  <RotateCcw size={14} />
+                </Button>
+              </div>
+            </ConfigItem>
+          </>
+        );
+
       case "marker":
         return (
           <>
@@ -367,15 +470,28 @@ export function ToolConfigPanel({ orientation, compact = false }: ToolConfigPane
                 ]}
               />
             </ConfigItem>
-            <ConfigItem label={`当前: ${markerCounter}`} isHorizontal={isHorizontal} isCompact={isCompact}>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={resetMarkerCounter}
-                title="重置序号计数器"
-              >
-                <RotateCcw size={14} />
-              </Button>
+            <ConfigItem label="起始序号" isHorizontal={isHorizontal} isCompact={isCompact}>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={1}
+                  value={markerCounter}
+                  onChange={(e) => setMarkerCounter(Number(e.target.value) || 1)}
+                  className={cn(
+                    "rounded-md border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring",
+                    isCompact ? "w-14 px-1.5 py-0.5 text-xs" : "w-16 px-2 py-1 text-sm"
+                  )}
+                  title="设置下一个插入的序号"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={resetMarkerCounter}
+                  title="重置序号为 1"
+                >
+                  <RotateCcw size={14} />
+                </Button>
+              </div>
             </ConfigItem>
           </>
         );

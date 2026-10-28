@@ -16,6 +16,7 @@ import {
   Type,
   Pencil,
   Hash,
+  MessageSquareShare,
   Grid3X3,
   Crop,
   ImagePlus,
@@ -25,6 +26,7 @@ import {
   Trash2,
   X,
   Download,
+  Save,
   Copy,
   FolderOpen,
   Settings,
@@ -49,6 +51,7 @@ const tools: { type: ToolType; icon: React.ReactNode; label: string }[] = [
   { type: "text", icon: <Type size={18} />, label: "文字 (T)" },
   { type: "brush", icon: <Pencil size={18} />, label: "画笔 (B)" },
   { type: "marker", icon: <Hash size={18} />, label: "序号 (M)" },
+  { type: "callout", icon: <MessageSquareShare size={18} />, label: "引导序号 (N)" },
   { type: "blur", icon: <Grid3X3 size={18} />, label: "马赛克 (U)" },
   { type: "crop", icon: <Crop size={18} />, label: "裁剪 (C)" },
   { type: "image", icon: <ImagePlus size={18} />, label: "插入图片 (I)" },
@@ -59,6 +62,7 @@ interface ToolbarProps {
   onOpenFile: () => void;
   onCreateBlank: () => void;
   onSave: () => void;
+  onSaveAs: () => void;
   onCopy: () => void;
   onOpenSettings: () => void;
   onClose: () => void;
@@ -71,6 +75,7 @@ export function Toolbar({
   onOpenFile,
   onCreateBlank,
   onSave,
+  onSaveAs,
   onCopy,
   onOpenSettings,
   onClose,
@@ -135,8 +140,13 @@ export function Toolbar({
               <FolderOpen size={16} />
             </Button>
           </Tooltip>
-          <Tooltip content="保存" side="bottom">
+          <Tooltip content="保存 (Ctrl+S)" side="bottom">
             <Button variant="ghost" size="icon-sm" onClick={onSave} disabled={!image}>
+              <Save size={16} />
+            </Button>
+          </Tooltip>
+          <Tooltip content="另存为" side="bottom">
+            <Button variant="ghost" size="icon-sm" onClick={onSaveAs} disabled={!image}>
               <Download size={16} />
             </Button>
           </Tooltip>
@@ -284,6 +294,7 @@ export function FloatingToolConfig() {
     "text",
     "brush",
     "marker",
+    "callout",
     "blur",
   ].includes(currentTool);
 

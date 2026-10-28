@@ -4,9 +4,9 @@ import { Stage, Layer, Image as KonvaImage, Transformer, Group, Rect, Circle, Li
 import Konva from "konva";
 import useImage from "use-image";
 import { useEditorStore, createAnnotation } from "@/store/editorStore";
-import { clamp } from "@/lib/utils";
+import { clamp, isNearWhiteColor } from "@/lib/utils";
 import { RenderAnnotation } from "./RenderAnnotation";
-import type { Annotation } from "@/types";
+import type { Annotation, RectAnnotation } from "@/types";
 
 interface AnnotationCanvasProps {
   containerWidth: number;
@@ -252,7 +252,7 @@ export function AnnotationCanvas({
     // 绘制边框
     ctx.beginPath();
     ctx.arc(magnifierRadius, magnifierRadius, magnifierRadius - 3, 0, Math.PI * 2);
-    ctx.strokeStyle = "#3b82f6";
+    ctx.strokeStyle = "#ff0000";
     ctx.lineWidth = 6;
     ctx.stroke();
 
@@ -264,7 +264,7 @@ export function AnnotationCanvas({
     ctx.stroke();
 
     // 绘制十字线
-    ctx.strokeStyle = "#3b82f6";
+    ctx.strokeStyle = "#ff0000";
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
 
@@ -393,6 +393,22 @@ export function AnnotationCanvas({
         setSelectedIds([newAnnotation.id]);
         // 设置为正在编辑，触发自动进入编辑模式
         setEditingTextId(newAnnotation.id);
+        return;
+      }
+
+      // 序号引导箭头工具 - 从序号圆拖出箭头
+      if (currentTool === "callout") {
+        const value =
+          toolConfig.markerType === "number"
+            ? markerCounter
+            : String.fromCharCode(64 + markerCounter); // A, B, C...
+
+        setIsDrawing(true);
+        startPointRef.current = pos;
+        const newAnnotation = createAnnotation(currentTool, toolConfig, pos, {
+          value,
+        });
+        setDrawingAnnotation(newAnnotation);
         return;
       }
 
@@ -572,6 +588,14 @@ export function AnnotationCanvas({
         });
         break;
 
+      case "callout":
+        setDrawingAnnotation({
+          ...drawingAnnotation,
+          targetX: pos.x - startPos.x,
+          targetY: pos.y - startPos.y,
+        });
+        break;
+
       case "brush":
         setDrawingAnnotation({
           ...drawingAnnotation,
@@ -647,6 +671,23 @@ export function AnnotationCanvas({
               aw = 100;
               ah = 30;
               break;
+            case "callout": {
+              const callout = annotation as {
+                targetX: number;
+                targetY: number;
+                size: number;
+              };
+              const cr = callout.size / 2;
+              const minX = Math.min(-cr, callout.targetX);
+              const minY = Math.min(-cr, callout.targetY);
+              const maxX = Math.max(cr, callout.targetX);
+              const maxY = Math.max(cr, callout.targetY);
+              ax = annotation.x + minX;
+              ay = annotation.y + minY;
+              aw = maxX - minX;
+              ah = maxY - minY;
+              break;
+            }
             case "arrow":
             case "line":
             case "brush":
@@ -733,15 +774,31 @@ export function AnnotationCanvas({
       case "brush":
         isValid = (drawingAnnotation as { points: number[] }).points.length > 4;
         break;
+      case "callout": {
+        const callout = drawingAnnotation as {
+          targetX: number;
+          targetY: number;
+          size: number;
+        };
+        const length = Math.sqrt(
+          callout.targetX * callout.targetX + callout.targetY * callout.targetY
+        );
+        isValid = length > callout.size / 2 + 8;
+        break;
+      }
     }
 
     if (isValid) {
       addAnnotation(drawingAnnotation);
+      // 引导箭头创建成功后才推进序号
+      if (drawingAnnotation.type === "callout") {
+        incrementMarkerCounter();
+      }
     }
 
     setDrawingAnnotation(null);
     startPointRef.current = null;
-  }, [isDrawing, drawingAnnotation, addAnnotation, setIsDrawing, isCropping, currentTool, cropArea, setIsCropping, setCropArea, selectionRect, annotations, selectedIds, setSelectedIds]);
+  }, [isDrawing, drawingAnnotation, addAnnotation, setIsDrawing, isCropping, currentTool, cropArea, setIsCropping, setCropArea, selectionRect, annotations, selectedIds, setSelectedIds, incrementMarkerCounter]);
 
   // 处理滚轮：根据选中标注类型调节属性，或缩放画布
   const handleCanvasWheel = useCallback(
@@ -826,6 +883,19 @@ export function AnnotationCanvas({
             setToolConfig({ markerSize: newSize });
             selectedAnnotations.forEach(ann => {
               if (ann.type === "marker") {
+                updateAnnotation(ann.id, { size: newSize });
+              }
+            });
+            adjusted = true;
+            break;
+          }
+          case "callout": {
+            // 调节引导箭头的序号圆大小
+            const currentSize = (firstAnn as { size: number }).size;
+            const newSize = clamp(currentSize + delta * 2, 16, 100);
+            setToolConfig({ markerSize: newSize });
+            selectedAnnotations.forEach(ann => {
+              if (ann.type === "callout") {
                 updateAnnotation(ann.id, { size: newSize });
               }
             });
@@ -986,6 +1056,18 @@ export function AnnotationCanvas({
           // 序号标记：缩放尺寸
           updates.size = (annotation as { size: number }).size * Math.max(scaleX, scaleY);
           break;
+        case "callout": {
+          // 序号引导箭头：缩放标记尺寸与箭头偏移
+          const callout = annotation as {
+            size: number;
+            targetX: number;
+            targetY: number;
+          };
+          updates.size = callout.size * Math.max(scaleX, scaleY);
+          updates.targetX = callout.targetX * scaleX;
+          updates.targetY = callout.targetY * scaleY;
+          break;
+        }
       }
 
       updateAnnotation(id, updates as Partial<Annotation>);
@@ -997,19 +1079,22 @@ export function AnnotationCanvas({
   // 计算图片适应参数
   const imageFit = getImageFit();
 
-  // 光标样式
+  // 自定义红色十字光标
+  const RED_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><path d='M16 3v7M16 22v7M3 16h7M22 16h7' stroke='#ff0000' stroke-width='2'/><rect x='14.4' y='14.4' width='3.2' height='3.2' fill='#ff0000'/></svg>`
+  )}") 16 16, crosshair`;
+
+  // 光标样式（始终显示红色十字光标）
   const getCursor = () => {
     switch (currentTool) {
       case "pan":
         return "grab";
-      case "select":
-        return "default";
       case "text":
         return "text";
       case "magnifier":
-        return "none"; // 放大镜工具隐藏鼠标光标
+        return "none"; // 放大镜工具隐藏鼠标光标，绘制自己的放大镜
       default:
-        return "crosshair";
+        return RED_CURSOR;
     }
   };
 
@@ -1102,6 +1187,37 @@ export function AnnotationCanvas({
               onLiveChange={requestTransformerUpdate}
             />
           )}
+
+          {/* 近白色矩形辅助虚线框 - 仅在编辑界面显示，导出时会跳过 */}
+          {[...annotations]
+            .filter(
+              (a) =>
+                a.type === "rectangle" &&
+                (a.strokeWidth === undefined ||
+                  a.strokeWidth <= 0 ||
+                  isNearWhiteColor(a.stroke))
+            )
+            .map((a) => {
+              const ann = a as RectAnnotation;
+              const guideScale = imageFit.scale * viewState.scale;
+              return (
+                <Rect
+                  key={`guide-${ann.id}`}
+                  name="guide-invisible-rect"
+                  x={ann.x}
+                  y={ann.y}
+                  rotation={ann.rotation || 0}
+                  width={ann.width}
+                  height={ann.height}
+                  cornerRadius={ann.cornerRadius}
+                  stroke="#8a8a8a"
+                  strokeWidth={2 / guideScale}
+                  dash={[6 / guideScale, 6 / guideScale]}
+                  listening={false}
+                  perfectDrawEnabled={false}
+                />
+              );
+            })}
         </Group>
 
         {/* 裁剪区域 */}

@@ -1,8 +1,23 @@
 # MarkPix
 
-一个现代化的wayland平台的片标注工具，基于 Tauri + React + TypeScript 构建。
+一个现代化的图片标注工具，基于 Tauri + React + TypeScript 构建。
 
 ![MarkPix](./.assert/image.png)
+
+## 📌 来源与修改说明
+
+本项目基于开源项目 [jswysnemc/markpix](https://github.com/jswysnemc/markpix)（作者：snemc）修改而来。
+原项目采用 MIT License，版权归原作者所有，许可证全文见 [LICENSE](./LICENSE)。
+
+本修改版在原项目基础上增加了以下功能：
+
+- 引导序号：序号圆形标记 + 普通箭头，形成 CAD 风格引导注释，可调线宽、颜色、箭头样式
+- 序号起始值可自定义（不再只能从 1 开始）
+- 保存 / 另存为拆分：保存直接覆盖当前文件，另存为单独选择路径
+- 所有工具样式修改后自动保存，下次启动自动恢复
+- macOS 构建支持（GitHub Actions 工作流）
+
+除上述修改外，代码与界面均来自原项目。若需回馈上游，欢迎向上游仓库提交 Issue 或 Pull Request。
 
 ## ✨ 功能特性
 
@@ -77,6 +92,17 @@ pnpm tauri dev
 pnpm tauri build
 ```
 
+### macOS 构建（GitHub Actions）
+
+仓库内置 `.github/workflows/macos-build.yml`，无需 Mac 电脑：
+
+1. 打开仓库的 **Actions** 页面，左侧选择 **Build macOS**；
+2. 点击 **Run workflow**，再点绿色执行按钮；
+3. 构建完成后，在该次运行页面底部下载 **Artifacts → MarkPix-macOS-universal**；
+4. 解压后得到 dmg，内含同时支持 Apple 芯片与 Intel 的通用包。
+
+未签名版本首次打开时需右键点击应用 -> 选择“打开”。
+
 ## 📦 命令行使用
 
 ```bash
@@ -110,8 +136,11 @@ markpix --help
 | `T` | 文字工具 |
 | `B` | 画笔工具 |
 | `M` | 序号标记 |
+| `N` | 引导序号（序号 + 箭头） |
 | `U` | 马赛克工具 |
 | `C` | 裁剪工具 |
+
+> macOS 上组合键使用 `Control`（而非 `Command`）。
 
 ## 🔧 配置文件
 
@@ -161,7 +190,7 @@ icon = "folder"
 - **画布**: Konva.js + react-konva
 - **状态管理**: Zustand
 - **后端**: Tauri 2 + Rust
-- **跨平台**: Linux / windows (未测试） / macOS (未测试)
+- **跨平台**: Linux / Windows / macOS
 
 ## 📄 许可证
 
