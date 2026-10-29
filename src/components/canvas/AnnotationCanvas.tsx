@@ -1444,6 +1444,8 @@ export function AnnotationCanvas({
 
   // 计算图片适应参数
   const imageFit = getImageFit();
+  // 图片在画布上的实际显示缩放（含视图缩放）
+  const totalScale = imageFit.scale * viewState.scale;
 
   // 自定义红色十字光标
   const RED_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
@@ -1584,6 +1586,28 @@ export function AnnotationCanvas({
                 />
               );
             })}
+        </Group>
+
+        {/* 图片范围虚线框 - 提示标注超出图片边界（仅编辑界面显示，导出时不含） */}
+        <Group
+          name="guide-image-bounds"
+          x={imageFit.x + viewState.offsetX}
+          y={imageFit.y + viewState.offsetY}
+          scaleX={totalScale}
+          scaleY={totalScale}
+          listening={false}
+        >
+          <Rect
+            x={0}
+            y={0}
+            width={image.width}
+            height={image.height}
+            stroke="#8a8a8a"
+            strokeWidth={1.5 / totalScale}
+            dash={[6 / totalScale, 4 / totalScale]}
+            listening={false}
+            perfectDrawEnabled={false}
+          />
         </Group>
 
         {/* 裁剪区域 */}

@@ -18,6 +18,7 @@
         "minWidth": 1260,
         "minHeight": 500,
         "center": true,
+        "maximized": true,
         "decorations": false,
         "transparent": false,
         "resizable": true,

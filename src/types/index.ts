@@ -487,6 +487,27 @@ export interface ImageInfo {
 }
 
 /**
+ * 保存在 PNG 中的 MarkPix 标注元数据
+ */
+export interface MarkpixFileMeta {
+  app: "markpix";
+  version: number;
+  createdAt: number;
+  imageWidth: number;
+  imageHeight: number;
+  markerCounter: number;
+  annotations: Annotation[];
+}
+
+/**
+ * 从 PNG 中读取到的 MarkPix 内嵌数据
+ */
+export interface MarkpixFilePayload {
+  meta: string;
+  base: string | null;
+}
+
+/**
  * 工具栏布局方向
  */
 export type ToolbarOrientation = "horizontal" | "vertical";

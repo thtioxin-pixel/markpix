@@ -1353,7 +1353,7 @@ function MagnifierAnnotationRenderer({
     ctx.restore();
 
     // 绘制边框
-    ctx.strokeStyle = '#3b82f6';
+    ctx.strokeStyle = "#3b82f6";
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.arc(targetRadius, targetRadius, targetRadius - 1.5, 0, Math.PI * 2);

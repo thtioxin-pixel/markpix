@@ -95,12 +95,108 @@ function scheduleToolConfigSave(save: () => void) {
 const MAX_HISTORY_LENGTH = 50;
 
 /**
+ * 非激活文档的状态快照
+ */
+interface DocumentSnapshot {
+  image: ImageInfo;
+  annotations: Annotation[];
+  history: HistoryState[];
+  historyIndex: number;
+  cropMask: CropMask | null;
+  markerCounter: number;
+  viewState: ViewState;
+}
+
+/**
+ * 文档标签页
+ */
+export interface DocumentTab {
+  id: string;
+  title: string;
+  savePath: string | null;
+  /** 最近一次保存/打开时的内容快照，用于判断未保存修改 */
+  savedSnapshot: string;
+  /** 非激活文档的状态快照；激活文档以顶层状态为准 */
+  snapshot?: DocumentSnapshot;
+}
+
+/** 标注数组序列化缓存（标注数组不可变，可安全按引用缓存） */
+const annotationsSnapshotCache = new WeakMap<Annotation[], string>();
+const cropMaskSnapshotCache = new WeakMap<CropMask, string>();
+
+function serializeAnnotations(annotations: Annotation[]): string {
+  let cached = annotationsSnapshotCache.get(annotations);
+  if (cached === undefined) {
+    cached = JSON.stringify(annotations);
+    annotationsSnapshotCache.set(annotations, cached);
+  }
+  return cached;
+}
+
+function serializeCropMask(cropMask: CropMask | null): string {
+  if (!cropMask) return "null";
+  let cached = cropMaskSnapshotCache.get(cropMask);
+  if (cached === undefined) {
+    cached = JSON.stringify(cropMask);
+    cropMaskSnapshotCache.set(cropMask, cached);
+  }
+  return cached;
+}
+
+/** 文档内容快照（仅比较会写入文件的标注与裁剪信息） */
+function contentSnapshot(annotations: Annotation[], cropMask: CropMask | null): string {
+  return `${serializeAnnotations(annotations)}|${serializeCropMask(cropMask)}`;
+}
+
+/** 采集当前激活文档的状态快照 */
+function snapshotActiveDocument(state: {
+  image: ImageInfo | null;
+  annotations: Annotation[];
+  history: HistoryState[];
+  historyIndex: number;
+  cropMask: CropMask | null;
+  markerCounter: number;
+  viewState: ViewState;
+}): DocumentSnapshot | undefined {
+  if (!state.image) return undefined;
+  return {
+    image: state.image,
+    annotations: JSON.parse(JSON.stringify(state.annotations)),
+    history: JSON.parse(JSON.stringify(state.history)),
+    historyIndex: state.historyIndex,
+    cropMask: state.cropMask ? { ...state.cropMask } : null,
+    markerCounter: state.markerCounter,
+    viewState: { ...state.viewState },
+  };
+}
+
+/**
  * 编辑器状态接口
  */
 interface EditorState {
   // 图片
   image: ImageInfo | null;
-  setImage: (image: ImageInfo | null) => void;
+
+  // 多文档标签
+  documents: DocumentTab[];
+  activeDocumentId: string | null;
+  /** 当前激活文档最近保存/打开时的内容快照 */
+  savedSnapshot: string;
+  createDocument: (
+    image: ImageInfo,
+    options?: {
+      annotations?: Annotation[];
+      markerCounter?: number;
+      savePath?: string | null;
+    }
+  ) => string;
+  switchDocument: (id: string) => void;
+  closeDocument: (id: string) => void;
+  getActiveDocument: () => DocumentTab | undefined;
+  markDocumentSaved: (path: string) => void;
+  markContentSaved: () => void;
+  isDocumentDirty: (id: string) => boolean;
+  hasUnsavedChanges: () => boolean;
 
   // 当前工具
   currentTool: ToolType;
@@ -131,14 +227,6 @@ interface EditorState {
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
-
-  // 复制到剪贴板时的历史索引（用于判断关闭时是否需要确认保存）
-  lastCopiedHistoryIndex: number | null;
-  setLastCopiedHistoryIndex: (index: number | null) => void;
-  // 复制时的状态快照（用于精确比较）
-  lastCopiedSnapshot: string | null;
-  setLastCopiedSnapshot: () => void;
-  hasChangedSinceCopy: () => boolean;
 
   // 视图状态
   viewState: ViewState;
@@ -206,9 +294,182 @@ interface EditorState {
 export const useEditorStore = create<EditorState>((set, get) => ({
   // 图片
   image: null,
-  setImage: (image) => {
-    set({ image, annotations: [], selectedIds: [], history: [], historyIndex: -1 });
-    // 工具栏始终保持横向排列
+
+  // 多文档标签
+  documents: [],
+  activeDocumentId: null,
+  savedSnapshot: "",
+  createDocument: (image, options) => {
+    const state = get();
+    const annotations = options?.annotations
+      ? JSON.parse(JSON.stringify(options.annotations))
+      : [];
+    const markerCounter = Math.max(1, Math.floor(options?.markerCounter ?? 1));
+    const savedSnapshot = contentSnapshot(annotations, null);
+    const id = generateId();
+
+    // 切换前先把当前激活文档的状态快照存入标签
+    const documents = state.activeDocumentId
+      ? state.documents.map((doc) =>
+          doc.id === state.activeDocumentId
+            ? { ...doc, snapshot: snapshotActiveDocument(state), savedSnapshot: state.savedSnapshot }
+            : doc
+        )
+      : state.documents;
+
+    set({
+      documents: [
+        ...documents,
+        {
+          id,
+          title: image.name || "未命名图片",
+          savePath: options?.savePath ?? image.path ?? null,
+          savedSnapshot,
+        },
+      ],
+      activeDocumentId: id,
+      image,
+      annotations,
+      selectedIds: [],
+      history: [],
+      historyIndex: -1,
+      cropArea: null,
+      cropMask: null,
+      markerCounter,
+      viewState: { scale: 1, offsetX: 0, offsetY: 0 },
+      savedSnapshot,
+    });
+    // 以打开时的状态作为历史起点，便于继续撤销/重做
+    get().pushHistory();
+    return id;
+  },
+  switchDocument: (id) => {
+    const state = get();
+    if (state.activeDocumentId === id) return;
+    const target = state.documents.find((doc) => doc.id === id);
+    if (!target?.snapshot) return;
+
+    // 保存当前激活文档快照
+    const documents = state.activeDocumentId
+      ? state.documents.map((doc) =>
+          doc.id === state.activeDocumentId
+            ? { ...doc, snapshot: snapshotActiveDocument(state), savedSnapshot: state.savedSnapshot }
+            : doc
+        )
+      : state.documents;
+
+    const snapshot = target.snapshot;
+    set({
+      documents,
+      activeDocumentId: id,
+      image: snapshot.image,
+      annotations: JSON.parse(JSON.stringify(snapshot.annotations)),
+      selectedIds: [],
+      history: JSON.parse(JSON.stringify(snapshot.history)),
+      historyIndex: snapshot.historyIndex,
+      cropArea: null,
+      cropMask: snapshot.cropMask ? { ...snapshot.cropMask } : null,
+      markerCounter: snapshot.markerCounter,
+      viewState: { ...snapshot.viewState },
+      savedSnapshot: target.savedSnapshot,
+    });
+  },
+  closeDocument: (id) => {
+    const state = get();
+    const index = state.documents.findIndex((doc) => doc.id === id);
+    if (index === -1) return;
+
+    // 关闭非激活标签，直接移除即可
+    if (state.activeDocumentId !== id) {
+      set({ documents: state.documents.filter((doc) => doc.id !== id) });
+      return;
+    }
+
+    const remaining = state.documents.filter((doc) => doc.id !== id);
+    if (remaining.length === 0) {
+      set({
+        documents: [],
+        activeDocumentId: null,
+        image: null,
+        annotations: [],
+        selectedIds: [],
+        history: [],
+        historyIndex: -1,
+        cropArea: null,
+        cropMask: null,
+        markerCounter: 1,
+        viewState: { scale: 1, offsetX: 0, offsetY: 0 },
+        savedSnapshot: "",
+      });
+      return;
+    }
+
+    // 激活相邻标签（优先左侧）
+    const next = remaining[Math.min(index, remaining.length - 1)];
+    const snapshot = next.snapshot;
+    if (!snapshot) return;
+    set({
+      documents: remaining,
+      activeDocumentId: next.id,
+      image: snapshot.image,
+      annotations: JSON.parse(JSON.stringify(snapshot.annotations)),
+      selectedIds: [],
+      history: JSON.parse(JSON.stringify(snapshot.history)),
+      historyIndex: snapshot.historyIndex,
+      cropArea: null,
+      cropMask: snapshot.cropMask ? { ...snapshot.cropMask } : null,
+      markerCounter: snapshot.markerCounter,
+      viewState: { ...snapshot.viewState },
+      savedSnapshot: next.savedSnapshot,
+    });
+  },
+  getActiveDocument: () => {
+    const state = get();
+    return state.documents.find((doc) => doc.id === state.activeDocumentId);
+  },
+  markDocumentSaved: (path) => {
+    const state = get();
+    const savedSnapshot = contentSnapshot(state.annotations, state.cropMask);
+    set({
+      image: state.image ? { ...state.image, path } : null,
+      savedSnapshot,
+      documents: state.documents.map((doc) =>
+        doc.id === state.activeDocumentId ? { ...doc, savePath: path, savedSnapshot } : doc
+      ),
+    });
+  },
+  markContentSaved: () => {
+    const state = get();
+    const savedSnapshot = contentSnapshot(state.annotations, state.cropMask);
+    set({
+      savedSnapshot,
+      documents: state.documents.map((doc) =>
+        doc.id === state.activeDocumentId ? { ...doc, savedSnapshot } : doc
+      ),
+    });
+  },
+  isDocumentDirty: (id) => {
+    const state = get();
+    if (id === state.activeDocumentId) {
+      return contentSnapshot(state.annotations, state.cropMask) !== state.savedSnapshot;
+    }
+    const doc = state.documents.find((item) => item.id === id);
+    if (!doc?.snapshot) return false;
+    return contentSnapshot(doc.snapshot.annotations, doc.snapshot.cropMask) !== doc.savedSnapshot;
+  },
+  hasUnsavedChanges: () => {
+    const state = get();
+    if (
+      state.activeDocumentId &&
+      contentSnapshot(state.annotations, state.cropMask) !== state.savedSnapshot
+    ) {
+      return true;
+    }
+    return state.documents.some((doc) =>
+      doc.id !== state.activeDocumentId && doc.snapshot
+        ? contentSnapshot(doc.snapshot.annotations, doc.snapshot.cropMask) !== doc.savedSnapshot
+        : false
+    );
   },
 
   // 当前工具
@@ -327,25 +588,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   canUndo: () => get().historyIndex >= 0,
   canRedo: () => get().historyIndex < get().history.length - 1,
 
-  // 复制到剪贴板时的历史索引
-  lastCopiedHistoryIndex: null,
-  setLastCopiedHistoryIndex: (index) => set({ lastCopiedHistoryIndex: index }),
-  // 复制时的状态快照
-  lastCopiedSnapshot: null,
-  setLastCopiedSnapshot: () => {
-    const { annotations, cropMask } = get();
-    const snapshot = JSON.stringify({ annotations, cropMask });
-    set({ lastCopiedSnapshot: snapshot });
-  },
-  hasChangedSinceCopy: () => {
-    const { lastCopiedSnapshot, annotations, cropMask } = get();
-    // 如果从未复制过，则认为有改动
-    if (lastCopiedSnapshot === null) return true;
-    // 比较当前状态与复制时的快照
-    const currentSnapshot = JSON.stringify({ annotations, cropMask });
-    return currentSnapshot !== lastCopiedSnapshot;
-  },
-
   // 视图状态
   viewState: {
     scale: 1,
@@ -397,9 +639,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     try {
       const fonts = await invoke<string[]>("list_system_fonts");
       set({ systemFonts: fonts });
-    } catch (error) {
-      console.error("加载系统字体失败:", error);
-    }
+    } catch {}
   },
 
   // 白板配置
@@ -508,9 +748,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           root.classList.remove("dark");
         }
       }
-    } catch (error) {
-      console.error("加载配置失败:", error);
-    }
+    } catch {}
   },
 
   saveConfig: async () => {
@@ -525,9 +763,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           tool_config: toolConfig,
         }
       });
-    } catch (error) {
-      console.error("保存配置失败:", error);
-    }
+    } catch {}
   },
 }));
 
